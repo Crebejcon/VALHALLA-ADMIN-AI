@@ -20,7 +20,7 @@ app.use(rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-7", leg
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const discord = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers]
+  intents: [GatewayIntentBits.Guilds]
 });
 let discordReady = false;
 
