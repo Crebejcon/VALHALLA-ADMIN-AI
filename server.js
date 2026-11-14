@@ -6,7 +6,7 @@ const rateLimit = require("express-rate-limit");
 const { Client, GatewayIntentBits, ChannelType, PermissionFlagsBits } = require("discord.js");
 const OpenAI = require("openai");
 
-const required = ["OPENAI_API_KEY", "DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "ADMIN_PASSWORD"];
+const required = ["GROQ_API_KEY", "DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "ADMIN_PASSWORD"];
 const missing = required.filter((key) => !process.env[key]);
 if (missing.length) {
   console.error("Variáveis obrigatórias ausentes:", missing.join(", "));
@@ -29,7 +29,7 @@ app.use(cors({ origin: process.env.ALLOWED_ORIGIN ? process.env.ALLOWED_ORIGIN.s
 app.use(express.json({ limit: "30kb" }));
 app.use(rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-7", legacyHeaders: false }));
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const ai = new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: "https://api.groq.com/openai/v1" });
 const discord = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
@@ -197,28 +197,59 @@ app.post("/api/assistant", auth, async (req, res) => {
   try {
     const prompt = String(req.body.message || "").trim();
     if (!prompt || prompt.length > 1500) return res.status(400).json({ error: "Envie uma mensagem de até 1500 caracteres." });
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
-      messages: [
-        { role: "system", content: "Você é o assistente administrativo do servidor VALHALLA no Discord. Responda em português brasileiro, seja objetivo. Use ferramentas apenas quando o pedido exigir. Nunca invente membros, cargos ou canais. Você pode consultar canais e cargos. Para criar canal ou enviar mensagem, prepare a ação e aguarde confirmação explícita do administrador. Nunca solicite nem revele tokens, senhas ou chaves. Não altere cargos, permissões, membros ou configurações fora das ferramentas disponíveis." },
-        { role: "user", content: prompt }
-      ],
-      tools: toolDefinitions,
-      tool_choice: "auto"
-    });
-    const msg = completion.choices[0].message;
-    if (msg.tool_calls?.length) {
-      const results = [];
+
+    const messages = [
+      {
+        role: "system",
+        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual, como um assistente geral. Responda perguntas comuns, explique ideias e ajude o administrador. Quando o pedido envolver consultar ou alterar o Discord, use somente as ferramentas disponíveis. Nunca invente dados do servidor. Para criar canal ou enviar mensagem, prepare a ação e aguarde confirmação explícita. Nunca peça nem revele tokens, senhas ou chaves. Não diga que executou algo antes de a ferramenta confirmar."
+      },
+      { role: "user", content: prompt }
+    ];
+
+    // Permite ao navegador enviar o histórico recente para manter o contexto da conversa.
+    if (Array.isArray(req.body.history)) {
+      const safeHistory = req.body.history.slice(-12).filter(m =>
+        m && ["user", "assistant"].includes(m.role) &&
+        typeof m.content === "string" && m.content.length <= 3000
+      );
+      messages.splice(1, 0, ...safeHistory);
+    }
+
+    for (let step = 0; step < 5; step++) {
+      const completion = await ai.chat.completions.create({
+        model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
+        messages,
+        tools: toolDefinitions,
+        tool_choice: "auto",
+        temperature: 0.6,
+        max_completion_tokens: 1800
+      });
+
+      const msg = completion.choices?.[0]?.message;
+      if (!msg) throw new Error("O provedor de IA não retornou uma resposta.");
+
+      if (!msg.tool_calls?.length) {
+        return res.json({ reply: msg.content || "Não consegui gerar uma resposta." });
+      }
+
+      messages.push(msg);
       for (const call of msg.tool_calls) {
         const args = JSON.parse(call.function.arguments || "{}");
         const result = await inspectTool(call.function.name, args);
-        results.push(result);
+        if (result.pending) {
+          return res.json({
+            reply: "Posso executar esta ação: " + result.summary + ". Confirme para continuar.",
+            pendingAction: result
+          });
+        }
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: JSON.stringify(result)
+        });
       }
-      const pending = results.find(r => r.pending);
-      if (pending) return res.json({ reply: "Posso executar esta ação: " + pending.summary + ". Confirme para continuar.", pendingAction: pending });
-      return res.json({ reply: "Consultei o servidor: " + JSON.stringify(results) });
     }
-    res.json({ reply: msg.content || "Não consegui gerar uma resposta." });
+    res.json({ reply: "Consegui consultar o servidor, mas a solicitação ficou complexa demais. Pode dividir em etapas?" });
   } catch (error) {
     console.error("Assistant:", error.message);
     res.status(500).json({ error: "Não foi possível processar o comando.", detail: error.message });
