@@ -177,7 +177,7 @@ async function inspectTool(name, args) {
     return { message: "Categoria criada: " + created.name, id: created.id };
   }
   if (name === "criar_canal") {
-    const nome = String(args.nome || "").trim().toLowerCase().replace(/[^a-z0-9áàâãéèêíïóôõöúçñ_-]/gi, "-").replace(/-+/g, "-").slice(0, 90);
+    const nome = String(args.nome || "").trim().replace(/\\s+/g, "-").replace(/-+/g, "-").slice(0, 90);
     if (!nome) throw new Error("Nome de canal inválido.");
     let parentId;
     if (args.categoria) {
