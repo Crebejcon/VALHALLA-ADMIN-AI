@@ -109,8 +109,21 @@ const toolDefinitions = [
   {
     type: "function",
     function: {
+      name: "criar_categoria",
+      description: "Cria imediatamente uma categoria no servidor quando o administrador solicitar.",
+      parameters: {
+        type: "object",
+        properties: { nome: { type: "string", description: "Nome da categoria." } },
+        required: ["nome"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "criar_canal",
-      description: "Prepara a criação de um canal de texto. A criação só ocorre após confirmação do administrador.",
+      description: "Cria imediatamente um canal de texto quando o administrador solicitar. Se a categoria indicada ainda não existir, crie-a primeiro.",
       parameters: {
         type: "object",
         properties: {
@@ -126,7 +139,7 @@ const toolDefinitions = [
     type: "function",
     function: {
       name: "enviar_mensagem",
-      description: "Prepara o envio de uma mensagem em um canal. O envio só ocorre após confirmação do administrador.",
+      description: "Envia imediatamente uma mensagem no canal indicado quando o administrador solicitar.",
       parameters: {
         type: "object",
         properties: {
@@ -150,17 +163,44 @@ async function inspectTool(name, args) {
     await guild.roles.fetch();
     return { roles: guild.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name, position: r.position })) };
   }
+  if (name === "criar_categoria") {
+    const nome = String(args.nome || "").trim().slice(0, 90);
+    if (!nome) throw new Error("Nome de categoria inválido.");
+    await guild.channels.fetch();
+    const existing = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === nome.toLowerCase());
+    if (existing) return { message: "A categoria " + existing.name + " já existe.", id: existing.id };
+    const created = await guild.channels.create({
+      name: nome,
+      type: ChannelType.GuildCategory,
+      reason: "Solicitado pelo administrador via VALHALLA ADMIN AI"
+    });
+    return { message: "Categoria criada: " + created.name, id: created.id };
+  }
   if (name === "criar_canal") {
     const nome = String(args.nome || "").trim().toLowerCase().replace(/[^a-z0-9áàâãéèêíïóôõöúçñ_-]/gi, "-").replace(/-+/g, "-").slice(0, 90);
     if (!nome) throw new Error("Nome de canal inválido.");
     let parentId;
     if (args.categoria) {
       await guild.channels.fetch();
-      const parent = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === String(args.categoria).toLowerCase());
-      if (!parent) throw new Error("Categoria não encontrada.");
+      let parent = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === String(args.categoria).trim().toLowerCase());
+      if (!parent) {
+        parent = await guild.channels.create({
+          name: String(args.categoria).trim().slice(0, 90),
+          type: ChannelType.GuildCategory,
+          reason: "Categoria criada automaticamente para atender ao pedido do administrador"
+        });
+      }
       parentId = parent.id;
     }
-    return { pending: true, action: "criar_canal", args: { nome, parentId }, summary: "Criar o canal #" + nome };
+    const existingChannel = guild.channels.cache.find(c => c.name.toLowerCase() === nome.toLowerCase() && c.parentId === (parentId || null));
+    if (existingChannel) return { message: "O canal #" + existingChannel.name + " já existe nessa categoria.", id: existingChannel.id };
+    const channel = await guild.channels.create({
+      name: nome,
+      type: ChannelType.GuildText,
+      parent: parentId || undefined,
+      reason: "Solicitado pelo administrador via VALHALLA ADMIN AI"
+    });
+    return { message: "Canal criado: #" + channel.name, id: channel.id, category: args.categoria || null };
   }
   if (name === "enviar_mensagem") {
     const mensagem = String(args.mensagem || "").trim();
@@ -168,7 +208,8 @@ async function inspectTool(name, args) {
     await guild.channels.fetch();
     const channel = guild.channels.cache.find(c => (c.id === String(args.canal) || c.name.toLowerCase() === String(args.canal).replace(/^#/, "").toLowerCase()) && c.isTextBased() && c.isSendable());
     if (!channel) throw new Error("Canal de texto não encontrado ou sem permissão para enviar.");
-    return { pending: true, action: "enviar_mensagem", args: { channelId: channel.id, mensagem }, summary: "Enviar mensagem em #" + channel.name };
+    await channel.send({ content: mensagem, allowedMentions: { parse: [] } });
+    return { message: "Mensagem enviada em #" + channel.name };
   }
   throw new Error("Ação não permitida.");
 }
@@ -201,7 +242,7 @@ app.post("/api/assistant", auth, async (req, res) => {
     const messages = [
       {
         role: "system",
-        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual, como um assistente geral. Responda perguntas comuns, explique ideias e ajude o administrador. Quando o pedido envolver consultar ou alterar o Discord, use somente as ferramentas disponíveis. Nunca invente dados do servidor. Para criar canal ou enviar mensagem, prepare a ação e aguarde confirmação explícita. Nunca peça nem revele tokens, senhas ou chaves. Não diga que executou algo antes de a ferramenta confirmar."
+        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, consultar canais/cargos ou enviar mensagem, execute imediatamente usando as ferramentas disponíveis, sem pedir confirmação adicional. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
       },
       { role: "user", content: prompt }
     ];
@@ -236,12 +277,6 @@ app.post("/api/assistant", auth, async (req, res) => {
       for (const call of msg.tool_calls) {
         const args = JSON.parse(call.function.arguments || "{}");
         const result = await inspectTool(call.function.name, args);
-        if (result.pending) {
-          return res.json({
-            reply: "Posso executar esta ação: " + result.summary + ". Confirme para continuar.",
-            pendingAction: result
-          });
-        }
         messages.push({
           role: "tool",
           tool_call_id: call.id,
