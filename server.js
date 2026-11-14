@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("path");
 const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
@@ -49,6 +50,10 @@ async function getGuild() {
   const guild = await discord.guilds.fetch(process.env.DISCORD_GUILD_ID);
   return guild;
 }
+
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "VALHALLA ADMIN AI", discord: discordReady ? "online" : "connecting" });
