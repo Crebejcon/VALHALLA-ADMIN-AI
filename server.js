@@ -389,23 +389,50 @@ app.post("/api/assistant", auth, async (req, res) => {
 
     // Permite ao navegador enviar o histórico recente para manter o contexto da conversa.
     if (Array.isArray(req.body.history)) {
-      const safeHistory = req.body.history.slice(-12).filter(m =>
+      const safeHistory = req.body.history.slice(-8).filter(m =>
         m && ["user", "assistant"].includes(m.role) &&
-        typeof m.content === "string" && m.content.length <= 3000
+        typeof m.content === "string" && m.content.length <= 1800
       );
       messages.splice(1, 0, ...safeHistory);
     }
 
     const plannedActions = [];
     for (let step = 0; step < 8; step++) {
-      const completion = await ai.chat.completions.create({
-        model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
-        messages,
-        tools: toolDefinitions,
-        tool_choice: "auto",
-        temperature: 0.6,
-        max_completion_tokens: 1800
-      });
+      const primaryModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+      const fallbackModel = process.env.GROQ_FALLBACK_MODEL || "openai/gpt-oss-20b";
+      let completion;
+      try {
+        completion = await ai.chat.completions.create({
+          model: primaryModel,
+          messages,
+          tools: toolDefinitions,
+          tool_choice: "auto",
+          temperature: 0.4,
+          max_completion_tokens: 1200
+        });
+      } catch (primaryError) {
+        const isRateLimit = primaryError.status === 429 || primaryError.statusCode === 429 ||
+          /rate.?limit|tokens per day|TPD/i.test(primaryError.message || "");
+        if (!isRateLimit || fallbackModel === primaryModel) throw primaryError;
+        try {
+          completion = await ai.chat.completions.create({
+            model: fallbackModel,
+            messages,
+            tools: toolDefinitions,
+            tool_choice: "auto",
+            temperature: 0.4,
+            max_completion_tokens: 1200
+          });
+        } catch (fallbackError) {
+          if (fallbackError.status === 429 || fallbackError.statusCode === 429 ||
+              /rate.?limit|tokens per day|TPD/i.test(fallbackError.message || "")) {
+            const friendly = new Error("O limite diário de tokens da Groq foi atingido nos modelos principal e reserva. Aguarde a renovação da cota ou configure outro modelo com limite disponível na variável GROQ_FALLBACK_MODEL.");
+            friendly.status = 429;
+            throw friendly;
+          }
+          throw fallbackError;
+        }
+      }
 
       const msg = completion.choices?.[0]?.message;
       if (!msg) throw new Error("O provedor de IA não retornou uma resposta.");
@@ -439,7 +466,11 @@ app.post("/api/assistant", auth, async (req, res) => {
       plan: plannedActions.length ? plannedActions : undefined });
   } catch (error) {
     console.error("Assistant:", error.message);
-    res.status(500).json({ error: "Não foi possível processar o comando.", detail: error.message });
+    const status = error.status === 429 ? 429 : 500;
+    res.status(status).json({
+      error: status === 429 ? "Limite de uso da IA atingido." : "Não foi possível processar o comando.",
+      detail: error.message
+    });
   }
 });
 
