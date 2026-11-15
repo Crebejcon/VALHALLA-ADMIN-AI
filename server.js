@@ -115,8 +115,9 @@ const toolDefinitions = [
         type: "object",
         properties: {
           nome: { type: "string", description: "Nome do cargo." },
-          cor: { type: "string", description: "Cor principal em hexadecimal, por exemplo #FF0000." },
-          cor_secundaria: { type: "string", description: "Segunda cor hexadecimal opcional para gradiente, por exemplo #0000FF." },
+          estilo: { type: "string", enum: ["rainbow", "rainbow_escuro", "rainbow_pastel", "rainbow_neon", "rainbow_azul", "rainbow_vermelho", "rainbow_roxo", "rainbow_verde", "rainbow_fogo", "rainbow_gelo", "sunset", "oceano", "dourado", "galaxia"], description: "Preset de gradiente: rainbow tradicional, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado ou galáxia." },
+          cor: { type: "string", description: "Cor principal HEX personalizada; substitui a cor principal do preset." },
+          cor_secundaria: { type: "string", description: "Segunda cor HEX personalizada; substitui a segunda cor do preset." },
           destaque: { type: "boolean", description: "Se verdadeiro, exibe os membros deste cargo separadamente na lista." }
         },
         required: ["nome"],
@@ -185,8 +186,25 @@ async function inspectTool(name, args) {
     const nome = String(args.nome || "").trim().slice(0, 100);
     if (!nome) throw new Error("Nome de cargo inválido.");
     const hexPattern = /^#[0-9A-Fa-f]{6}$/;
-    const primary = args.cor ? String(args.cor).trim() : "#5865F2";
-    const secondary = args.cor_secundaria ? String(args.cor_secundaria).trim() : null;
+    const palettes = {
+      rainbow: ["#FF0000", "#FF8C00"],
+      rainbow_escuro: ["#5B1647", "#172554"],
+      rainbow_pastel: ["#FFB3C6", "#B8C0FF"],
+      rainbow_neon: ["#FF00E5", "#00F5FF"],
+      rainbow_azul: ["#001BFF", "#00C8FF"],
+      rainbow_vermelho: ["#4A0000", "#FF1744"],
+      rainbow_roxo: ["#240046", "#C77DFF"],
+      rainbow_verde: ["#003B2F", "#7CFF00"],
+      rainbow_fogo: ["#7F0000", "#FFD000"],
+      rainbow_gelo: ["#B9F3FF", "#245BFF"],
+      sunset: ["#FF512F", "#DD2476"],
+      oceano: ["#001F54", "#00B4D8"],
+      dourado: ["#7A4E00", "#FFD700"],
+      galaxia: ["#12002F", "#7B2CBF"]
+    };
+    const preset = palettes[String(args.estilo || "").toLowerCase()] || null;
+    const primary = args.cor ? String(args.cor).trim() : (preset ? preset[0] : "#5865F2");
+    const secondary = args.cor_secundaria ? String(args.cor_secundaria).trim() : (preset ? preset[1] : null);
     if (!hexPattern.test(primary)) throw new Error("Cor principal inválida. Use hexadecimal, por exemplo #FF0000.");
     if (secondary && !hexPattern.test(secondary)) throw new Error("Cor secundária inválida. Use hexadecimal, por exemplo #0000FF.");
     const existing = guild.roles.cache.find(r => r.name.toLowerCase() === nome.toLowerCase());
@@ -282,7 +300,7 @@ app.post("/api/assistant", auth, async (req, res) => {
     const messages = [
       {
         role: "system",
-        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, criar cargo, consultar canais/cargos ou enviar mensagem, execute imediatamente usando as ferramentas disponíveis, sem pedir confirmação adicional. Ao criar cargo, escolha cores solicitadas pelo administrador; se ele pedir rainbow/arco-íris, use um gradiente com duas cores bem contrastantes quando o servidor permitir. Não conceda permissões ao cargo nem o atribua a membros, a menos que uma ferramenta específica seja adicionada futuramente. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
+        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, criar cargo, consultar canais/cargos ou enviar mensagem, execute imediatamente usando as ferramentas disponíveis, sem pedir confirmação adicional. Ao criar cargo, reconheça os estilos rainbow tradicional, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado e galáxia; use o preset correspondente no parâmetro estilo. Se o usuário informar cores HEX, use-as. Não conceda permissões ao cargo nem o atribua a membros. Não prometa animação contínua: cargos do Discord usam cores sólidas ou gradientes estáticos conforme os recursos habilitados no servidor. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
       },
       { role: "user", content: prompt }
     ];
