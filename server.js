@@ -31,7 +31,7 @@ app.use(rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-7", leg
 
 const ai = new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: "https://api.groq.com/openai/v1" });
 const discord = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 let discordReady = false;
 
@@ -170,6 +170,19 @@ const toolDefinitions = [
       }
     }
   }
+
+  ...[
+    ["editar_cargo","Edita um cargo existente por nome ou ID. Campos opcionais: novo_nome, cor HEX, destaque (boolean), mencionavel (boolean), permissões como lista de nomes de permissões Discord.",{cargo:{type:"string"},novo_nome:{type:"string"},cor:{type:"string"},destaque:{type:"boolean"},mencionavel:{type:"boolean"},permissoes:{type:"array",items:{type:"string"}}},["cargo"]],
+    ["excluir_cargo","Exclui um cargo existente por nome ou ID. Só execute após confirmação explícita do administrador.",{cargo:{type:"string"}},["cargo"]],
+    ["editar_canal","Edita um canal existente: nome, tópico (topic) e categoria (nome/ID; use vazio para remover).",{canal:{type:"string"},novo_nome:{type:"string"},topico:{type:"string"},categoria:{type:"string"}},["canal"]],
+    ["excluir_canal","Exclui um canal/categoria existente. Só execute após confirmação explícita do administrador.",{canal:{type:"string"}},["canal"]],
+    ["listar_membros","Lista membros reais do servidor (requer intenção privilegiada Server Members Intent).",{},[]],
+    ["editar_membro","Altera apelido de um membro por ID ou nome.",{membro:{type:"string"},apelido:{type:"string"}},["membro","apelido"]],
+    ["cargo_membro","Adiciona ou remove um cargo de um membro.",{membro:{type:"string"},cargo:{type:"string"},acao:{type:"string",enum:["adicionar","remover"]}},["membro","cargo","acao"]],
+    ["moderar_membro","Expulsa ou bane um membro. Só execute após confirmação explícita do administrador.",{membro:{type:"string"},acao:{type:"string",enum:["expulsar","banir"]},motivo:{type:"string"}},["membro","acao"]],
+    ["permissoes_canal","Define permissões de um cargo ou membro em um canal. Use permitir/negar com nomes de permissões Discord.",{canal:{type:"string"},alvo:{type:"string"},tipo_alvo:{type:"string",enum:["cargo","membro"]},permitir:{type:"array",items:{type:"string"}},negar:{type:"array",items:{type:"string"}}},["canal","alvo","tipo_alvo"]],
+    ["gerenciar_mensagem","Localiza uma mensagem recente por ID em um canal e edita ou apaga. Apagar exige confirmação explícita.",{canal:{type:"string"},mensagem_id:{type:"string"},acao:{type:"string",enum:["editar","apagar"]},texto:{type:"string"}},["canal","mensagem_id","acao"]]
+  ].map(([name,description,properties,required])=>({type:"function",function:{name,description,parameters:{type:"object",properties,required,additionalProperties:false}}})),
 ];
 
 async function inspectTool(name, args) {
@@ -270,6 +283,87 @@ async function inspectTool(name, args) {
     await channel.send({ content: mensagem, allowedMentions: { parse: [] } });
     return { message: "Mensagem enviada em #" + channel.name };
   }
+
+  const findByNameOrId = (collection, value) => collection.find(x => x.id === String(value) || x.name?.toLowerCase() === String(value).replace(/^#|^@/,"").toLowerCase());
+  const permBits = (names) => (names || []).map(n => {
+    const key = Object.keys(PermissionFlagsBits).find(k => k.toLowerCase() === String(n).toLowerCase());
+    if (!key) throw new Error("Permissão desconhecida: " + n);
+    return PermissionFlagsBits[key];
+  });
+  if (name === "editar_cargo" || name === "excluir_cargo") {
+    await guild.roles.fetch();
+    const role = findByNameOrId(guild.roles.cache, args.cargo);
+    if (!role || role.id === guild.id) throw new Error("Cargo não encontrado ou não editável.");
+    if (name === "excluir_cargo") { await role.delete("Excluído pelo administrador via VALHALLA ADMIN AI"); return {message:"Cargo excluído: "+role.name}; }
+    const edit = {};
+    if (args.novo_nome !== undefined) edit.name = String(args.novo_nome).trim().slice(0,100);
+    if (args.cor !== undefined) { if (!/^#[0-9a-f]{6}$/i.test(args.cor)) throw new Error("Cor HEX inválida."); edit.color = args.cor; }
+    if (args.destaque !== undefined) edit.hoist = Boolean(args.destaque);
+    if (args.mencionavel !== undefined) edit.mentionable = Boolean(args.mencionavel);
+    if (args.permissoes !== undefined) edit.permissions = permBits(args.permissoes);
+    if (!Object.keys(edit).length) throw new Error("Informe pelo menos um campo para editar.");
+    await role.edit(edit, "Editado pelo administrador via VALHALLA ADMIN AI");
+    return {message:"Cargo atualizado: "+role.name,id:role.id};
+  }
+  if (name === "editar_canal" || name === "excluir_canal") {
+    await guild.channels.fetch();
+    const channel = findByNameOrId(guild.channels.cache, args.canal);
+    if (!channel) throw new Error("Canal ou categoria não encontrado.");
+    if (name === "excluir_canal") { await channel.delete("Excluído pelo administrador via VALHALLA ADMIN AI"); return {message:"Canal/categoria excluído: "+channel.name}; }
+    const edit = {};
+    if (args.novo_nome !== undefined) edit.name = String(args.novo_nome).trim().slice(0,100);
+    if (args.topico !== undefined && "topic" in channel) edit.topic = String(args.topico).slice(0,1024);
+    if (args.categoria !== undefined) {
+      const parent = args.categoria ? findByNameOrId(guild.channels.cache.filter(c=>c.type===ChannelType.GuildCategory),args.categoria) : null;
+      if (args.categoria && !parent) throw new Error("Categoria de destino não encontrada.");
+      if (channel.type === ChannelType.GuildCategory) throw new Error("Não é possível mover uma categoria para outra categoria.");
+      edit.parent = parent?.id ?? null;
+    }
+    if (!Object.keys(edit).length) throw new Error("Informe o que deseja alterar.");
+    await channel.edit(edit, "Editado pelo administrador via VALHALLA ADMIN AI");
+    return {message:"Canal atualizado: "+channel.name,id:channel.id};
+  }
+  if (name === "listar_membros") {
+    const members = await guild.members.fetch();
+    return {total:members.size,members:members.map(m=>({id:m.id,username:m.user.username,displayName:m.displayName,bot:m.user.bot,roles:m.roles.cache.filter(r=>r.id!==guild.id).map(r=>r.name)})).slice(0,200)};
+  }
+  if (name === "editar_membro" || name === "cargo_membro" || name === "moderar_membro") {
+    const members = await guild.members.fetch();
+    const member = members.get(String(args.membro)) || members.find(m=>m.user.username.toLowerCase()===String(args.membro).toLowerCase() || m.displayName.toLowerCase()===String(args.membro).toLowerCase());
+    if (!member) throw new Error("Membro não encontrado. Prefira informar o ID Discord.");
+    if (name === "editar_membro") { await member.setNickname(String(args.apelido).slice(0,32) || null,"Alterado via VALHALLA ADMIN AI"); return {message:"Apelido atualizado para "+member.displayName,id:member.id}; }
+    if (name === "cargo_membro") {
+      await guild.roles.fetch(); const role=findByNameOrId(guild.roles.cache,args.cargo);
+      if (!role || role.id===guild.id) throw new Error("Cargo não encontrado.");
+      if (args.acao==="adicionar") await member.roles.add(role,"Atribuído via VALHALLA ADMIN AI"); else await member.roles.remove(role,"Removido via VALHALLA ADMIN AI");
+      return {message:"Cargo "+(args.acao==="adicionar"?"adicionado a ":"removido de ")+member.displayName,id:member.id};
+    }
+    const reason=String(args.motivo||"Ação administrativa via VALHALLA ADMIN AI").slice(0,400);
+    if(args.acao==="expulsar") await member.kick(reason); else await member.ban({reason});
+    return {message:"Membro "+(args.acao==="expulsar"?"expulso: ":"banido: ")+member.user.username,id:member.id};
+  }
+  if (name === "permissoes_canal") {
+    await guild.channels.fetch();
+    const channel=findByNameOrId(guild.channels.cache,args.canal);
+    if(!channel || !channel.permissionOverwrites) throw new Error("Canal não encontrado.");
+    let target;
+    if(args.tipo_alvo==="cargo"){await guild.roles.fetch();target=findByNameOrId(guild.roles.cache,args.alvo);}
+    else {const members=await guild.members.fetch();target=members.get(String(args.alvo))||members.find(m=>m.user.username.toLowerCase()===String(args.alvo).toLowerCase());}
+    if(!target) throw new Error("Cargo/membro alvo não encontrado.");
+    const allow=permBits(args.permitir),deny=permBits(args.negar);
+    await channel.permissionOverwrites.edit(target.id,{...Object.fromEntries(allow.map(p=>[p,true])),...Object.fromEntries(deny.map(p=>[p,false]))},"Permissões editadas via VALHALLA ADMIN AI");
+    return {message:"Permissões atualizadas em "+channel.name+" para "+(target.name||target.displayName||target.user?.username||target.id)};
+  }
+  if (name === "gerenciar_mensagem") {
+    await guild.channels.fetch(); const channel=findByNameOrId(guild.channels.cache,args.canal);
+    if(!channel || !channel.isTextBased() || !channel.messages) throw new Error("Canal não aceita mensagens.");
+    const message=await channel.messages.fetch(String(args.mensagem_id));
+    if(args.acao==="apagar"){await message.delete();return {message:"Mensagem apagada em #"+channel.name};}
+    if(typeof args.texto!=="string" || !args.texto.trim() || args.texto.length>2000) throw new Error("Texto inválido (1 a 2000 caracteres).");
+    await message.edit({content:args.texto,allowedMentions:{parse:[]}});
+    return {message:"Mensagem editada em #"+channel.name};
+  }
+
   throw new Error("Ação não permitida.");
 }
 
@@ -301,7 +395,7 @@ app.post("/api/assistant", auth, async (req, res) => {
     const messages = [
       {
         role: "system",
-        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, criar cargo, consultar canais/cargos ou enviar mensagem, execute imediatamente usando as ferramentas disponíveis, sem pedir confirmação adicional. Ao criar cargo, reconheça os estilos rainbow tradicional, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado, galáxia; use o preset correspondente no parâmetro estilo. Gradientes de duas cores só funcionam se o servidor tiver desbloqueado Enhanced Role Styles com 3 Impulsos. Sem essa vantagem, crie cargos com uma cor sólida. Se o usuário informar cores HEX, use-as. Não conceda permissões ao cargo nem o atribua a membros. Não prometa animação contínua: cargos do Discord usam cores sólidas ou gradientes estáticos conforme os recursos habilitados no servidor. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
+        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e administrador operacional do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, criar cargo, consultar canais/cargos/membros, editar cargos/canais, gerenciar permissões, editar apelidos, atribuir/remover cargos e editar mensagens, execute usando as ferramentas disponíveis. Antes de excluir cargos/canais, expulsar/banir membros ou apagar mensagens, explique exatamente o alvo e peça confirmação explícita; não chame a ferramenta até o usuário confirmar. Para alterações comuns, execute apenas quando a ordem for clara. Ao criar cargo, reconheça os estilos rainbow tradicional, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado, galáxia; use o preset correspondente no parâmetro estilo. Gradientes de duas cores só funcionam se o servidor tiver desbloqueado Enhanced Role Styles com 3 Impulsos. Sem essa vantagem, crie cargos com uma cor sólida. Se o usuário informar cores HEX, use-as. Só altere permissões e atribua cargos quando o administrador pedir explicitamente. Nunca conceda Administrator por inferência. Não prometa animação contínua: cargos do Discord usam cores sólidas ou gradientes estáticos conforme os recursos habilitados no servidor. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Prefira IDs quando nomes forem ambíguos. Respeite hierarquia de cargos e permissões do bot. Se uma função exigir intenção privilegiada não habilitada no Portal Discord, explique isso claramente. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
       },
       { role: "user", content: prompt }
     ];
