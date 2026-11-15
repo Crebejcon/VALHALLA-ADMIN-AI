@@ -368,24 +368,11 @@ async function inspectTool(name, args) {
 }
 
 async function executePending(pending) {
-  const guild = await getGuild();
-  if (pending.action === "criar_canal") {
-    const channel = await guild.channels.create({
-      name: pending.args.nome,
-      type: ChannelType.GuildText,
-      parent: pending.args.parentId || undefined,
-      reason: "Solicitado pelo VALHALLA ADMIN AI e confirmado pelo administrador"
-    });
-    return { message: "Canal criado: #" + channel.name, id: channel.id };
-  }
-  if (pending.action === "enviar_mensagem") {
-    const channel = await guild.channels.fetch(pending.args.channelId);
-    if (!channel || !channel.isTextBased() || !channel.isSendable()) throw new Error("Canal indisponível.");
-    await channel.send({ content: pending.args.mensagem, allowedMentions: { parse: [] } });
-    return { message: "Mensagem enviada em #" + channel.name };
-  }
-  throw new Error("Ação pendente inválida.");
+  if (!pending || typeof pending.action !== "string" || !pending.args || typeof pending.args !== "object") throw new Error("Ação pendente inválida.");
+  return inspectTool(pending.action, pending.args);
 }
+
+const READ_ONLY_TOOLS = new Set(["listar_canais", "listar_cargos", "listar_membros"]);
 
 app.post("/api/assistant", auth, async (req, res) => {
   try {
@@ -409,7 +396,8 @@ app.post("/api/assistant", auth, async (req, res) => {
       messages.splice(1, 0, ...safeHistory);
     }
 
-    for (let step = 0; step < 5; step++) {
+    const plannedActions = [];
+    for (let step = 0; step < 8; step++) {
       const completion = await ai.chat.completions.create({
         model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
         messages,
@@ -423,13 +411,23 @@ app.post("/api/assistant", auth, async (req, res) => {
       if (!msg) throw new Error("O provedor de IA não retornou uma resposta.");
 
       if (!msg.tool_calls?.length) {
-        return res.json({ reply: msg.content || "Não consegui gerar uma resposta." });
+        return res.json({
+          reply: msg.content || (plannedActions.length ? "Preparei as alterações solicitadas." : "Não consegui gerar uma resposta."),
+          plan: plannedActions.length ? plannedActions : undefined
+        });
       }
 
       messages.push(msg);
       for (const call of msg.tool_calls) {
         const args = JSON.parse(call.function.arguments || "{}");
-        const result = await inspectTool(call.function.name, args);
+        const toolName = call.function.name;
+        let result;
+        if (READ_ONLY_TOOLS.has(toolName)) {
+          result = await inspectTool(toolName, args);
+        } else {
+          plannedActions.push({ action: toolName, args });
+          result = { planned: true, message: "Ação adicionada ao plano. Ainda não foi executada." };
+        }
         messages.push({
           role: "tool",
           tool_call_id: call.id,
@@ -437,7 +435,8 @@ app.post("/api/assistant", auth, async (req, res) => {
         });
       }
     }
-    res.json({ reply: "Consegui consultar o servidor, mas a solicitação ficou complexa demais. Pode dividir em etapas?" });
+    res.json({ reply: "Preparei parte do plano. Divida o pedido em etapas menores para completar.",
+      plan: plannedActions.length ? plannedActions : undefined });
   } catch (error) {
     console.error("Assistant:", error.message);
     res.status(500).json({ error: "Não foi possível processar o comando.", detail: error.message });
@@ -446,12 +445,18 @@ app.post("/api/assistant", auth, async (req, res) => {
 
 app.post("/api/confirm", auth, async (req, res) => {
   try {
-    const pending = req.body.pendingAction;
-    if (!pending || !["criar_canal", "enviar_mensagem"].includes(pending.action)) {
-      return res.status(400).json({ error: "Ação pendente inválida." });
+    const pendingActions = Array.isArray(req.body.pendingActions) ? req.body.pendingActions : (req.body.pendingAction ? [req.body.pendingAction] : []);
+    if (!pendingActions.length || pendingActions.length > 30) return res.status(400).json({ error: "Plano inválido. Envie de 1 a 30 ações." });
+    const results = [];
+    for (let i = 0; i < pendingActions.length; i++) {
+      const pending = pendingActions[i];
+      if (!pending || typeof pending.action !== "string" || READ_ONLY_TOOLS.has(pending.action)) { results.push({ ok: false, index: i, error: "Ação inválida." }); break; }
+      try { const result = await executePending(pending); results.push({ ok: true, index: i, ...result }); }
+      catch (error) { results.push({ ok: false, index: i, error: error.message }); break; }
     }
-    const result = await executePending(pending);
-    res.json({ ok: true, ...result });
+    const failed = results.find(r => !r.ok);
+    res.status(failed ? 502 : 200).json({ ok: !failed, completed: results.filter(r => r.ok).length, total: pendingActions.length, results,
+      message: failed ? "O plano parou após uma falha. As etapas anteriores podem ter sido concluídas." : "Plano executado e concluído." });
   } catch (error) {
     console.error("Confirm:", error.message);
     res.status(502).json({ error: "A ação não foi concluída.", detail: error.message });
