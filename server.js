@@ -188,7 +188,7 @@ async function inspectTool(name, args) {
     if (!nome) throw new Error("Nome de cargo inválido.");
     const hexPattern = /^#[0-9A-Fa-f]{6}$/;
     const palettes = {
-      rainbow: ["#FF0000", "#FF8C00"],
+      rainbow: ["#FF0000", "#00FF00", "#0000FF"],
       rainbow_escuro: ["#5B1647", "#172554"],
       rainbow_pastel: ["#FFB3C6", "#B8C0FF"],
       rainbow_neon: ["#FF00E5", "#00F5FF"],
