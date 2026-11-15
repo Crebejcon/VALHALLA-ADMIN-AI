@@ -82,7 +82,7 @@ app.get("/api/discord/overview", auth, async (_req, res) => {
       name: guild.name,
       memberCount: guild.memberCount,
       channels: guild.channels.cache.map(c => ({ id: c.id, name: c.name, type: c.type })),
-      roles: guild.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name, position: r.position }))
+      roles: guild.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name, position: r.position, colors: { primaryColor: r.colors.primaryColor, secondaryColor: r.colors.secondaryColor, tertiaryColor: r.colors.tertiaryColor }, hoist: r.hoist }))
     });
   } catch (error) {
     res.status(502).json({ error: error.message });
@@ -181,7 +181,7 @@ async function inspectTool(name, args) {
   }
   if (name === "listar_cargos") {
     await guild.roles.fetch();
-    return { roles: guild.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name, position: r.position })) };
+    return { roles: guild.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name, position: r.position, colors: { primaryColor: r.colors.primaryColor, secondaryColor: r.colors.secondaryColor, tertiaryColor: r.colors.tertiaryColor }, hoist: r.hoist })) };
   }
   if (name === "criar_cargo") {
     const nome = String(args.nome || "").trim().slice(0, 100);
@@ -204,10 +204,10 @@ async function inspectTool(name, args) {
       galaxia: ["#12002F", "#7B2CBF"],
       holografico: ["#A9C9FF", "#FFBBEC", "#FFC3A0"]
     };
+    const isHolographic = String(args.estilo || "").toLowerCase() === "holografico";
     const preset = palettes[String(args.estilo || "").toLowerCase()] || null;
     const primary = isHolographic ? "#A9C9FF" : (args.cor ? String(args.cor).trim() : (preset ? preset[0] : "#5865F2"));
     const secondary = isHolographic ? "#FFBBEC" : (args.cor_secundaria ? String(args.cor_secundaria).trim() : (preset ? preset[1] : null));
-    const isHolographic = String(args.estilo || "").toLowerCase() === "holografico";
     const tertiary = isHolographic ? "#FFC3A0" : null;
     if (!hexPattern.test(primary)) throw new Error("Cor principal inválida. Use hexadecimal, por exemplo #FF0000.");
     if (secondary && !hexPattern.test(secondary)) throw new Error("Cor secundária inválida. Use hexadecimal, por exemplo #0000FF.");
