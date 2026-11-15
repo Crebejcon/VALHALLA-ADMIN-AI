@@ -109,6 +109,24 @@ const toolDefinitions = [
   {
     type: "function",
     function: {
+      name: "criar_cargo",
+      description: "Cria imediatamente um cargo no servidor com cor sólida ou gradiente. Não concede permissões administrativas nem atribui o cargo a membros.",
+      parameters: {
+        type: "object",
+        properties: {
+          nome: { type: "string", description: "Nome do cargo." },
+          cor: { type: "string", description: "Cor principal em hexadecimal, por exemplo #FF0000." },
+          cor_secundaria: { type: "string", description: "Segunda cor hexadecimal opcional para gradiente, por exemplo #0000FF." },
+          destaque: { type: "boolean", description: "Se verdadeiro, exibe os membros deste cargo separadamente na lista." }
+        },
+        required: ["nome"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "criar_categoria",
       description: "Cria imediatamente uma categoria no servidor quando o administrador solicitar.",
       parameters: {
@@ -162,6 +180,28 @@ async function inspectTool(name, args) {
   if (name === "listar_cargos") {
     await guild.roles.fetch();
     return { roles: guild.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name, position: r.position })) };
+  }
+  if (name === "criar_cargo") {
+    const nome = String(args.nome || "").trim().slice(0, 100);
+    if (!nome) throw new Error("Nome de cargo inválido.");
+    const hexPattern = /^#[0-9A-Fa-f]{6}$/;
+    const primary = args.cor ? String(args.cor).trim() : "#5865F2";
+    const secondary = args.cor_secundaria ? String(args.cor_secundaria).trim() : null;
+    if (!hexPattern.test(primary)) throw new Error("Cor principal inválida. Use hexadecimal, por exemplo #FF0000.");
+    if (secondary && !hexPattern.test(secondary)) throw new Error("Cor secundária inválida. Use hexadecimal, por exemplo #0000FF.");
+    const existing = guild.roles.cache.find(r => r.name.toLowerCase() === nome.toLowerCase());
+    if (existing) throw new Error("Já existe um cargo com esse nome.");
+    const options = {
+      name: nome,
+      color: primary,
+      hoist: Boolean(args.destaque),
+      mentionable: false,
+      permissions: [],
+      reason: "Solicitado pelo administrador via VALHALLA ADMIN AI"
+    };
+    if (secondary) options.colors = { primaryColor: primary, secondaryColor: secondary };
+    const role = await guild.roles.create(options);
+    return { message: "Cargo criado: " + role.name + " (" + (secondary ? primary + " → " + secondary : primary) + ").", id: role.id, color: role.hexColor };
   }
   if (name === "criar_categoria") {
     const nome = String(args.nome || "").trim().slice(0, 90);
@@ -242,7 +282,7 @@ app.post("/api/assistant", auth, async (req, res) => {
     const messages = [
       {
         role: "system",
-        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, consultar canais/cargos ou enviar mensagem, execute imediatamente usando as ferramentas disponíveis, sem pedir confirmação adicional. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
+        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, criar cargo, consultar canais/cargos ou enviar mensagem, execute imediatamente usando as ferramentas disponíveis, sem pedir confirmação adicional. Ao criar cargo, escolha cores solicitadas pelo administrador; se ele pedir rainbow/arco-íris, use um gradiente com duas cores bem contrastantes quando o servidor permitir. Não conceda permissões ao cargo nem o atribua a membros, a menos que uma ferramenta específica seja adicionada futuramente. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
       },
       { role: "user", content: prompt }
     ];
