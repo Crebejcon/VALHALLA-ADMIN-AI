@@ -82,7 +82,7 @@ app.get("/api/discord/overview", auth, async (_req, res) => {
       name: guild.name,
       memberCount: guild.memberCount,
       channels: guild.channels.cache.map(c => ({ id: c.id, name: c.name, type: c.type })),
-      roles: guild.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name, position: r.position, colors: { primaryColor: r.colors.primaryColor, secondaryColor: r.colors.secondaryColor, tertiaryColor: r.colors.tertiaryColor }, hoist: r.hoist }))
+      roles: guild.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name, position: r.position, colors: { primaryColor: r.colors.primaryColor, secondaryColor: r.colors.secondaryColor }, hoist: r.hoist }))
     });
   } catch (error) {
     res.status(502).json({ error: error.message });
@@ -115,10 +115,9 @@ const toolDefinitions = [
         type: "object",
         properties: {
           nome: { type: "string", description: "Nome do cargo." },
-          estilo: { type: "string", enum: ["rainbow", "rainbow_escuro", "rainbow_pastel", "rainbow_neon", "rainbow_azul", "rainbow_vermelho", "rainbow_roxo", "rainbow_verde", "rainbow_fogo", "rainbow_gelo", "sunset", "oceano", "dourado", "galaxia", "holografico"], description: "Estilo oficial: gradientes de duas cores (rainbow, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado, galáxia) ou holografico (estilo holográfico oficial do Discord; exige Enhanced Role Styles ativo)." },
+          estilo: { type: "string", enum: ["rainbow", "rainbow_escuro", "rainbow_pastel", "rainbow_neon", "rainbow_azul", "rainbow_vermelho", "rainbow_roxo", "rainbow_verde", "rainbow_fogo", "rainbow_gelo", "sunset", "oceano", "dourado", "galaxia"], description: "Estilo oficial: gradientes de duas cores (rainbow, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado, galáxia)." },
           cor: { type: "string", description: "Cor principal HEX personalizada; substitui a cor principal do preset." },
           cor_secundaria: { type: "string", description: "Segunda cor HEX personalizada; substitui a segunda cor do preset." },
-          cor_terciaria: { type: "string", description: "Terceira cor HEX opcional para gradientes de três cores." },
           destaque: { type: "boolean", description: "Se verdadeiro, exibe os membros deste cargo separadamente na lista." }
         },
         required: ["nome"],
@@ -181,7 +180,7 @@ async function inspectTool(name, args) {
   }
   if (name === "listar_cargos") {
     await guild.roles.fetch();
-    return { roles: guild.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name, position: r.position, colors: { primaryColor: r.colors.primaryColor, secondaryColor: r.colors.secondaryColor, tertiaryColor: r.colors.tertiaryColor }, hoist: r.hoist })) };
+    return { roles: guild.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name, position: r.position, colors: { primaryColor: r.colors.primaryColor, secondaryColor: r.colors.secondaryColor }, hoist: r.hoist })) };
   }
   if (name === "criar_cargo") {
     const nome = String(args.nome || "").trim().slice(0, 100);
@@ -202,16 +201,12 @@ async function inspectTool(name, args) {
       oceano: ["#001F54", "#00B4D8"],
       dourado: ["#7A4E00", "#FFD700"],
       galaxia: ["#12002F", "#7B2CBF"],
-      holografico: ["#A9C9FF", "#FFBBEC", "#FFC3A0"]
     };
-    const isHolographic = String(args.estilo || "").toLowerCase() === "holografico";
     const preset = palettes[String(args.estilo || "").toLowerCase()] || null;
-    const primary = isHolographic ? "#A9C9FF" : (args.cor ? String(args.cor).trim() : (preset ? preset[0] : "#5865F2"));
-    const secondary = isHolographic ? "#FFBBEC" : (args.cor_secundaria ? String(args.cor_secundaria).trim() : (preset ? preset[1] : null));
-    const tertiary = isHolographic ? "#FFC3A0" : null;
+    const primary = args.cor ? String(args.cor).trim() : (preset ? preset[0] : "#5865F2");
+    const secondary = args.cor_secundaria ? String(args.cor_secundaria).trim() : (preset ? preset[1] : null);
     if (!hexPattern.test(primary)) throw new Error("Cor principal inválida. Use hexadecimal, por exemplo #FF0000.");
     if (secondary && !hexPattern.test(secondary)) throw new Error("Cor secundária inválida. Use hexadecimal, por exemplo #0000FF.");
-    if (args.cor_terciaria && !isHolographic) throw new Error("O Discord reserva a terceira cor para o estilo holográfico oficial. Use estilo holografico.");
     const existing = guild.roles.cache.find(r => r.name.toLowerCase() === nome.toLowerCase());
     if (existing) throw new Error("Já existe um cargo com esse nome.");
     const options = {
@@ -222,13 +217,9 @@ async function inspectTool(name, args) {
       permissions: [],
       reason: "Solicitado pelo administrador via VALHALLA ADMIN AI"
     };
-    if (secondary || tertiary) options.colors = {
-      primaryColor: primary,
-      ...(secondary ? { secondaryColor: secondary } : {}),
-      ...(tertiary ? { tertiaryColor: tertiary } : {})
-    };
+    if (secondary) options.colors = { primaryColor: primary, secondaryColor: secondary };
     const role = await guild.roles.create(options);
-    const colorSummary = [primary, secondary, tertiary].filter(Boolean).join(" → ");
+    const colorSummary = [primary, secondary].filter(Boolean).join(" → ");
     return { message: "Cargo criado: " + role.name + " (" + colorSummary + ").", id: role.id, color: role.hexColor };
   }
   if (name === "criar_categoria") {
@@ -310,7 +301,7 @@ app.post("/api/assistant", auth, async (req, res) => {
     const messages = [
       {
         role: "system",
-        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, criar cargo, consultar canais/cargos ou enviar mensagem, execute imediatamente usando as ferramentas disponíveis, sem pedir confirmação adicional. Ao criar cargo, reconheça os estilos rainbow tradicional, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado, galáxia e holografico; use o preset correspondente no parâmetro estilo. Gradientes usam duas cores. O estilo holográfico usa as três cores oficiais fixas do Discord e só funciona se Enhanced Role Styles estiver desbloqueado no servidor. Se o usuário informar cores HEX, use-as. Não conceda permissões ao cargo nem o atribua a membros. Não prometa animação contínua: cargos do Discord usam cores sólidas ou gradientes estáticos conforme os recursos habilitados no servidor. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
+        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, criar cargo, consultar canais/cargos ou enviar mensagem, execute imediatamente usando as ferramentas disponíveis, sem pedir confirmação adicional. Ao criar cargo, reconheça os estilos rainbow tradicional, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado, galáxia; use o preset correspondente no parâmetro estilo. Gradientes de duas cores só funcionam se o servidor tiver desbloqueado Enhanced Role Styles com 3 Impulsos. Sem essa vantagem, crie cargos com uma cor sólida. Se o usuário informar cores HEX, use-as. Não conceda permissões ao cargo nem o atribua a membros. Não prometa animação contínua: cargos do Discord usam cores sólidas ou gradientes estáticos conforme os recursos habilitados no servidor. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
       },
       { role: "user", content: prompt }
     ];
