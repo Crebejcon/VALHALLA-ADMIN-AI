@@ -115,7 +115,7 @@ const toolDefinitions = [
         type: "object",
         properties: {
           nome: { type: "string", description: "Nome do cargo." },
-          estilo: { type: "string", enum: ["rainbow", "rainbow_escuro", "rainbow_pastel", "rainbow_neon", "rainbow_azul", "rainbow_vermelho", "rainbow_roxo", "rainbow_verde", "rainbow_fogo", "rainbow_gelo", "sunset", "oceano", "dourado", "galaxia"], description: "Preset de gradiente: rainbow tradicional, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado ou galáxia." },
+          estilo: { type: "string", enum: ["rainbow", "rainbow_escuro", "rainbow_pastel", "rainbow_neon", "rainbow_azul", "rainbow_vermelho", "rainbow_roxo", "rainbow_verde", "rainbow_fogo", "rainbow_gelo", "sunset", "oceano", "dourado", "galaxia", "holografico"], description: "Estilo oficial: gradientes de duas cores (rainbow, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado, galáxia) ou holografico (estilo holográfico oficial do Discord; exige Enhanced Role Styles ativo)." },
           cor: { type: "string", description: "Cor principal HEX personalizada; substitui a cor principal do preset." },
           cor_secundaria: { type: "string", description: "Segunda cor HEX personalizada; substitui a segunda cor do preset." },
           cor_terciaria: { type: "string", description: "Terceira cor HEX opcional para gradientes de três cores." },
@@ -188,7 +188,7 @@ async function inspectTool(name, args) {
     if (!nome) throw new Error("Nome de cargo inválido.");
     const hexPattern = /^#[0-9A-Fa-f]{6}$/;
     const palettes = {
-      rainbow: ["#FF0000", "#00FF00", "#0000FF"],
+      rainbow: ["#FF0000", "#8A2BE2"],
       rainbow_escuro: ["#5B1647", "#172554"],
       rainbow_pastel: ["#FFB3C6", "#B8C0FF"],
       rainbow_neon: ["#FF00E5", "#00F5FF"],
@@ -201,15 +201,17 @@ async function inspectTool(name, args) {
       sunset: ["#FF512F", "#DD2476"],
       oceano: ["#001F54", "#00B4D8"],
       dourado: ["#7A4E00", "#FFD700"],
-      galaxia: ["#12002F", "#7B2CBF"]
+      galaxia: ["#12002F", "#7B2CBF"],
+      holografico: ["#A9C9FF", "#FFBBEC", "#FFC3A0"]
     };
     const preset = palettes[String(args.estilo || "").toLowerCase()] || null;
-    const primary = args.cor ? String(args.cor).trim() : (preset ? preset[0] : "#5865F2");
-    const secondary = args.cor_secundaria ? String(args.cor_secundaria).trim() : (preset ? preset[1] : null);
-    const tertiary = args.cor_terciaria ? String(args.cor_terciaria).trim() : (preset ? preset[2] : null);
+    const primary = isHolographic ? "#A9C9FF" : (args.cor ? String(args.cor).trim() : (preset ? preset[0] : "#5865F2"));
+    const secondary = isHolographic ? "#FFBBEC" : (args.cor_secundaria ? String(args.cor_secundaria).trim() : (preset ? preset[1] : null));
+    const isHolographic = String(args.estilo || "").toLowerCase() === "holografico";
+    const tertiary = isHolographic ? "#FFC3A0" : null;
     if (!hexPattern.test(primary)) throw new Error("Cor principal inválida. Use hexadecimal, por exemplo #FF0000.");
     if (secondary && !hexPattern.test(secondary)) throw new Error("Cor secundária inválida. Use hexadecimal, por exemplo #0000FF.");
-    if (tertiary && !hexPattern.test(tertiary)) throw new Error("Cor terciária inválida. Use hexadecimal, por exemplo #00FF00.");
+    if (args.cor_terciaria && !isHolographic) throw new Error("O Discord reserva a terceira cor para o estilo holográfico oficial. Use estilo holografico.");
     const existing = guild.roles.cache.find(r => r.name.toLowerCase() === nome.toLowerCase());
     if (existing) throw new Error("Já existe um cargo com esse nome.");
     const options = {
@@ -308,7 +310,7 @@ app.post("/api/assistant", auth, async (req, res) => {
     const messages = [
       {
         role: "system",
-        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, criar cargo, consultar canais/cargos ou enviar mensagem, execute imediatamente usando as ferramentas disponíveis, sem pedir confirmação adicional. Ao criar cargo, reconheça os estilos rainbow tradicional, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado e galáxia; use o preset correspondente no parâmetro estilo. Se o usuário informar cores HEX, use-as. Não conceda permissões ao cargo nem o atribua a membros. Não prometa animação contínua: cargos do Discord usam cores sólidas ou gradientes estáticos conforme os recursos habilitados no servidor. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
+        content: "Você é o VALHALLA ADMIN AI, assistente inteligente e parceiro administrativo do servidor VALHALLA no Discord. Converse em português brasileiro de forma natural, clara, prestativa e contextual. Responda perguntas comuns sem alterar o servidor. Quando o administrador der uma ordem clara para criar categoria, criar canal, criar cargo, consultar canais/cargos ou enviar mensagem, execute imediatamente usando as ferramentas disponíveis, sem pedir confirmação adicional. Ao criar cargo, reconheça os estilos rainbow tradicional, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado, galáxia e holografico; use o preset correspondente no parâmetro estilo. Gradientes usam duas cores. O estilo holográfico usa as três cores oficiais fixas do Discord e só funciona se Enhanced Role Styles estiver desbloqueado no servidor. Se o usuário informar cores HEX, use-as. Não conceda permissões ao cargo nem o atribua a membros. Não prometa animação contínua: cargos do Discord usam cores sólidas ou gradientes estáticos conforme os recursos habilitados no servidor. Não execute alterações por causa de conversa casual, hipótese, pergunta ou pedido de explicação. Nunca invente dados do servidor. Nunca peça nem revele tokens, senhas ou chaves. Informe com honestidade o resultado real de cada ação."
       },
       { role: "user", content: prompt }
     ];
