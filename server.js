@@ -118,6 +118,7 @@ const toolDefinitions = [
           estilo: { type: "string", enum: ["rainbow", "rainbow_escuro", "rainbow_pastel", "rainbow_neon", "rainbow_azul", "rainbow_vermelho", "rainbow_roxo", "rainbow_verde", "rainbow_fogo", "rainbow_gelo", "sunset", "oceano", "dourado", "galaxia"], description: "Preset de gradiente: rainbow tradicional, escuro, pastel, neon, azul, vermelho, roxo, verde, fogo, gelo, pôr do sol, oceano, dourado ou galáxia." },
           cor: { type: "string", description: "Cor principal HEX personalizada; substitui a cor principal do preset." },
           cor_secundaria: { type: "string", description: "Segunda cor HEX personalizada; substitui a segunda cor do preset." },
+          cor_terciaria: { type: "string", description: "Terceira cor HEX opcional para gradientes de três cores." },
           destaque: { type: "boolean", description: "Se verdadeiro, exibe os membros deste cargo separadamente na lista." }
         },
         required: ["nome"],
@@ -205,8 +206,10 @@ async function inspectTool(name, args) {
     const preset = palettes[String(args.estilo || "").toLowerCase()] || null;
     const primary = args.cor ? String(args.cor).trim() : (preset ? preset[0] : "#5865F2");
     const secondary = args.cor_secundaria ? String(args.cor_secundaria).trim() : (preset ? preset[1] : null);
+    const tertiary = args.cor_terciaria ? String(args.cor_terciaria).trim() : (preset ? preset[2] : null);
     if (!hexPattern.test(primary)) throw new Error("Cor principal inválida. Use hexadecimal, por exemplo #FF0000.");
     if (secondary && !hexPattern.test(secondary)) throw new Error("Cor secundária inválida. Use hexadecimal, por exemplo #0000FF.");
+    if (tertiary && !hexPattern.test(tertiary)) throw new Error("Cor terciária inválida. Use hexadecimal, por exemplo #00FF00.");
     const existing = guild.roles.cache.find(r => r.name.toLowerCase() === nome.toLowerCase());
     if (existing) throw new Error("Já existe um cargo com esse nome.");
     const options = {
@@ -217,9 +220,14 @@ async function inspectTool(name, args) {
       permissions: [],
       reason: "Solicitado pelo administrador via VALHALLA ADMIN AI"
     };
-    if (secondary) options.colors = { primaryColor: primary, secondaryColor: secondary };
+    if (secondary || tertiary) options.colors = {
+      primaryColor: primary,
+      ...(secondary ? { secondaryColor: secondary } : {}),
+      ...(tertiary ? { tertiaryColor: tertiary } : {})
+    };
     const role = await guild.roles.create(options);
-    return { message: "Cargo criado: " + role.name + " (" + (secondary ? primary + " → " + secondary : primary) + ").", id: role.id, color: role.hexColor };
+    const colorSummary = [primary, secondary, tertiary].filter(Boolean).join(" → ");
+    return { message: "Cargo criado: " + role.name + " (" + colorSummary + ").", id: role.id, color: role.hexColor };
   }
   if (name === "criar_categoria") {
     const nome = String(args.nome || "").trim().slice(0, 90);
