@@ -169,7 +169,7 @@ const toolDefinitions = [
         additionalProperties: false
       }
     }
-  }
+  },
 
   ...[
     ["editar_cargo","Edita um cargo existente por nome ou ID. Campos opcionais: novo_nome, cor HEX, destaque (boolean), mencionavel (boolean), permissões como lista de nomes de permissões Discord.",{cargo:{type:"string"},novo_nome:{type:"string"},cor:{type:"string"},destaque:{type:"boolean"},mencionavel:{type:"boolean"},permissoes:{type:"array",items:{type:"string"}}},["cargo"]],
